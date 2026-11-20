@@ -1,4 +1,4 @@
-# macOS Sandbox App → External Drive / macOS 沙盒应用数据迁移到外置硬盘
+# PlayCover 原神/绝区零移到外置硬盘省空间 · macOS 沙盒 App 数据迁移 / Move PlayCover Games to External Drive
 
 **PlayCover 原神/绝区零软链接黑屏解决 · HFS+ 稀疏映像真挂载方案**
 **Fix PlayCover Genshin Impact symlink black screen via HFS+ sparse bundle mount**
