@@ -73,6 +73,18 @@ hdiutil attach -nobrowse -mountpoint "$HOME/Library/Containers/<bundle-id>/<data
 
 进程存活 + 截图正常 = 必要但不充分，必须到第 4 条。Process alive + normal screenshot is necessary but not sufficient — check #4.
 
+## 实测范围声明 / Verification Scope
+
+**中文**：标题/description 中的「已实测」按如下范围理解——
+
+- **原神 Genshin Impact**：完整链路实测。HFS+ 映像挂载 → 启动游戏 → 画面正常（"点击进入"）→ `lsof` 证实进程从外置映像读取 `AssetBundles/*.blk`（198 个文件句柄）；另做过多组 A/B 单变量对照，确认软链黑屏、挂载正常。
+- **绝区零 Zenless Zone Zero**：仅完成**备份迁移**（29G 容器移到外置盘、文件数校验一致）+ exFAT 软链的读写能力测试；**未做游戏启动验证**——其 app 本体不在测试机上，无法启动。它不构成"挂载方案在其上也可用"的证据，但迁移备份本身已成功。
+
+**EN**: "Verified" in the title/description means:
+
+- **Genshin Impact** — full end-to-end verification: HFS+ image mounted → game launched → normal "Click to Start" screen → `lsof` confirmed the process reading `AssetBundles/*.blk` from the external image (198 file handles), with A/B control experiments confirming symlink failure and mount success.
+- **Zenless Zone Zero** — only **backup migration** (29G container moved to external disk, file counts verified) plus an exFAT symlink read/write probe; **no game launch verification** (its app bundle was absent on the test machine). It does not constitute evidence that the mount approach works for that game; the backup migration itself did succeed.
+
 ## 踩坑实录 / Failure Catalog
 
 | # | 坑 / Pitfall | 规避 / Avoidance |
