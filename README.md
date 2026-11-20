@@ -98,16 +98,53 @@ hdiutil attach -nobrowse -mountpoint "$HOME/Library/Containers/<bundle-id>/<data
 
 四要素完整复盘见 `references/failure-catalog.md`。Full 4-element postmortems: `references/failure-catalog.md`.
 
-## 目录结构 / Structure
+## 仓库文件清单 / Repository Files
 
+共 8 个文件，各司其职：
+
+| 文件 / File | 是什么 / What | 有什么用 / When to read |
+| --- | --- | --- |
+| `SKILL.md` | 主说明：核心决策树 + 8 条铁律 + 5 阶段工作流程 + 6 项验收判据 | 动手前先读它判断方案是否适用、该走哪条路；AI 助手靠它识别何时启用本 skill |
+| `references/probe-and-verify.md` | 命令手册：100M 探针、APFS/HFS+ 提权差异、窗口取证、A/B 对照、lsof 判据的可复制命令 | 抄命令、判断"真黑屏还是遮挡"、做资源层验收时查它 |
+| `references/failure-catalog.md` | 6 条失败路径的「现象 / 根因 / 为什么犯 / 如何避免」四要素复盘 | 踩坑时先查：软链黑屏、APFS 提权失败、TCC 删除静默失效等 |
+| `references/sources.md` | 官方讨论 #473 / #1712、B 站视频、技术文章的原文关键段与链接 | 需要溯源、核实"为什么软链不行"时查它 |
+| `scripts/migrate_to_external.sh` | 首次迁移流程骨架（占位符版）：盘点 → 备份 → 探针 → 建映像 → 挂载 → 验收 → 释放空间 | 首次迁移时逐段执行，每段验证后再继续，不可整段盲跑 |
+| `scripts/mount_external.sh` | 重启/拔插外置盘后的重挂脚本：已挂载直接退出、检测进程占用、检查映像存在、挂载后报资源文件数 | 每次重启或重插外置盘后运行一次 |
+| `LICENSE` | MIT 许可 | 了解使用与再分发条款 |
+| `README.md` | 本页 | 快速概览与导航 |
+
+## 安装与使用 / Installation & Usage
+
+### 1. 安装 / Install
+
+**作为 WorkBuddy skill（推荐）**：本机实测用户级 skill 目录为 `~/.workbuddy/skills/`，把仓库克隆进去，目录名与 `SKILL.md` 里的 `name` 一致：
+
+```bash
+git clone https://github.com/Jason4V/playcover-ext-drive.git \
+  "$HOME/.workbuddy/skills/macos-sandbox-app-external-drive"
 ```
-SKILL.md                       决策树 + 铁律 + 4 阶段流程 + 6 项判据
-references/probe-and-verify.md  探针、窗口取证、lsof 判据的可复制命令
-references/failure-catalog.md   6 条失败的四要素复盘
-references/sources.md           官方讨论 / 视频 / 文章原文与链接
-scripts/migrate_to_external.sh  迁移流程骨架（占位符版）
-scripts/mount_external.sh       重启后重新挂载模板
-```
+
+之后用自然语言提需求即可，例如「把 PlayCover 原神的数据移到外置硬盘释放空间」，助手会依据 `SKILL.md` 的 `description` 判断是否启用；也可直接说「用 macos-sandbox-app-external-drive skill」。其他 AI 工具：把整个仓库放到该工具读取 skill 的目录，保证 `SKILL.md` 位于子目录根部。
+
+### 2. 不当 skill、只当文档用 / Use as documentation
+
+不安装也行：读 `SKILL.md` 决策树 → 按 `references/probe-and-verify.md` 跑探针 → 手动执行上面「快速开始」的命令。脚本是模板，不是开箱即用的安装包。
+
+### 3. 脚本怎么用 / Using the scripts
+
+- 两个脚本里所有 `***...***` 都是占位符，需替换成真实值：bundle id、容器内数据子目录、外置盘路径、映像名、App 进程关键词。
+- `migrate_to_external.sh`：按顺序逐段执行，每段验证后再进下一段；第 6 段"释放本机空间"只是注释，删除本机数据需你确认后手动做。
+- `mount_external.sh`：替换占位符后可直接运行；已挂载会直接退出、App 在运行会拒绝挂载；建议重启/拔盘后跑一次。
+- 外置盘须已插入并挂载；路径含空格时保持引号。
+
+### 4. 最小使用流程 / Minimal workflow
+
+1. 只读取证：`du` 找大头，确认外置盘空间/格式、App 未运行。
+2. 备份：`rsync -a --exclude='._*' ...`。
+3. 100M 探针：挂到真实目标目录再 `detach`，确认文件数不变。
+4. 建 HFS+ 映像 → 灌数据 → 挂到容器子目录。
+5. 启动游戏，按上面六条判据验收（尤其第 4 条 `lsof`）。
+6. 确认无误后才删除本机原目录释放空间。
 
 ## 来源 / Sources
 
