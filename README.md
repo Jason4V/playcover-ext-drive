@@ -1,160 +1,153 @@
-# PlayCover 原神/绝区零移到外置硬盘省空间 · macOS 沙盒 App 数据迁移 / Move PlayCover Games to External Drive
+> 中文读者请见：[本项目中文版介绍](README.zh-CN.md) — full Chinese version of this README.
 
-**PlayCover 原神/绝区零软链接黑屏解决 · HFS+ 稀疏映像真挂载方案**
-**Fix PlayCover Genshin Impact symlink black screen via HFS+ sparse bundle mount**
+# Move PlayCover Genshin Impact / Zenless Zone Zero Data to an External Drive and Free Up Internal Storage
 
-把沙盒 App 的几十 GB 数据搬到外置硬盘、释放内置盘空间。
-**中文**：软链接（`ln -s`）在 macOS 沙盒内会导致启动黑屏；唯一稳定可靠的做法是建 HFS+ 稀疏磁盘映像，用 `hdiutil attach -mountpoint` 真挂载到容器内的数据子目录。存档留在本地，**无需 root、无需关闭 SIP、无需完全磁盘访问**。
-**EN**: Symlinks fail inside the macOS sandbox (black screen on launch). This project mounts an HFS+ sparse bundle into the app's container data subdirectory with `hdiutil attach -mountpoint` — no root, no SIP disable, no Full Disk Access.
+**Fix the PlayCover symlink black screen with HFS+ sparse bundle mounting · Genshin Impact and Zenless Zone Zero tested**
 
-**关键词 / Keywords**：`macOS 沙盒应用迁移` `PlayCover 原神外置硬盘` `原神软链接黑屏` `macOS 内置盘爆满` `外置硬盘 游戏数据` `sandbox symlink black screen` `Genshin Impact external drive` `HFS+ sparsebundle mount` `mount_apfs Operation not permitted` `PlayCover game data migration`
+Move tens of gigabytes of sandboxed app data to an external drive and reclaim internal disk space.
+A symlink (`ln -s`) inside the macOS sandbox causes a black screen on launch. The only reliable approach is to create an HFS+ sparse disk image and mount it with `hdiutil attach -mountpoint` onto the app's container data subdirectory. Save files stay local. **No root, no SIP disable, no Full Disk Access required.**
 
-## 核心结论 / TL;DR
+**Keywords**: `macOS sandboxed app migration` `PlayCover Genshin Impact external drive` `Genshin Impact symlink black screen` `internal disk full` `game data on external drive` `sandbox symlink black screen` `Genshin Impact external drive` `HFS+ sparsebundle mount` `mount_apfs Operation not permitted` `PlayCover game data migration`
 
-| 方案 / Approach | 结果 / Result |
+## TL;DR
+
+| Approach | Result |
 | --- | --- |
-| `ln -s` 容器子目录 → 外置盘 | ❌ 启动黑屏（窗口截图仅 29KB 纯色），无崩溃日志；A/B 对照实测证伪 |
-| `mount_apfs` 挂 APFS 卷 | ❌ 无免密 sudo 报 `Operation not permitted`；关 SIP 又会导致 iOS App 不可用 |
-| **HFS+ sparsebundle + `hdiutil attach -mountpoint`** | ✅ 画面正常，`lsof` 证实游戏读取外置 `AssetBundles/*.blk` 资源 |
+| `ln -s` container subdirectory → external disk | ❌ Black screen on launch (window screenshot only 29 KB, solid color), no crash log; disproved by A/B control |
+| `mount_apfs` on an APFS volume | ❌ `Operation not permitted` without passwordless sudo; disabling SIP breaks iOS apps |
+| **HFS+ sparsebundle + `hdiutil attach -mountpoint`** | ✅ Normal rendering; `lsof` confirms the game reads external `AssetBundles/*.blk` resources |
 
-**方法论 / Method**：容器根保持真实目录；只挂载内层数据大头（原神为 `Data/Library/MihoyoDownload`，约 31G），存档 `Documents` 留本机。非空挂载点会遮蔽原内容、卸载即完整恢复，因此可零风险 A/B 测试。
-**Method**: keep the container root real; mount only the inner data-heavy subdirectory; saves stay local. Non-empty mountpoints are shadowed and fully restored on detach — enabling zero-risk A/B testing.
+**Method**: keep the container root as a real directory; mount only the inner data-heavy subdirectory (for Genshin Impact, `Data/Library/MihoyoDownload`, ~31 GB); keep saves (`Documents`) local. A non-empty mount point shadows the original content and restores it intact on detach — so A/B testing is risk-free.
 
-## 为什么 / Why
+## Why
 
-**中文**：PlayCover 安装的 iOS 游戏把资源包放在沙盒容器里，原神/绝区零单个游戏可达 30G+。网传的 `ln -s` 软链方案看似能腾空间，但 macOS 沙盒 App 在启动阶段会校验容器内路径，指向 `/Volumes` 的符号链接校验失败 → 黑屏、不崩溃、进程还在，极难排查。官方讨论明确这是安全模型设计：若允许软链读任意路径将是严重漏洞。正解是**挂载而非软链**。
+PlayCover-installed iOS games keep their asset bundles inside sandbox containers; a single Genshin Impact or Zenless Zone Zero install can exceed 30 GB. The widely circulated `ln -s` trick appears to free space, but sandboxed apps validate container paths at launch; a symlink pointing to `/Volumes` fails validation → black screen, no crash log, process still alive, which is hard to diagnose. Official discussions confirm this is by security design: allowing a symlink to read arbitrary paths would be a serious vulnerability. The fix is **mounting, not symlinking**.
 
-**EN**: PlayCover games store asset bundles inside sandbox containers (30G+ each). The popular `ln -s` trick seems to free space, but sandboxed apps validate container paths at launch; a symlink pointing to `/Volumes` fails validation → black screen, no crash log, process alive. Maintainers confirm this is by security design. The fix is **mounting, not symlinking**.
+## Use Cases
 
-## 适用场景 / Use Cases
+- Move PlayCover games (Genshin Impact, Zenless Zone Zero, Honkai Star Rail, etc.) to an external drive
+- Offload a large data subdirectory of any sandboxed app (the container root cannot be symlinked)
+- Internal disk full, external disk is exFAT, and you do not want to reformat
 
-- PlayCover 版原神、绝区零、崩铁等 iOS 游戏数据迁外置盘 / Move PlayCover iOS game data to an external disk
-- 任何沙盒 App 的大体积数据子目录外迁（容器根不可软链）/ Any sandboxed app with a large data subdirectory
-- 内置盘爆满但外置盘是 exFAT、不想重格 / Internal disk full, external disk is exFAT and you don't want to reformat
+## Quick Start
 
-## 快速开始 / Quick Start
-
-前置：替换 `scripts/*.sh` 中所有 `***占位符***`。核心步骤（详见 `SKILL.md`）：
+Prerequisite: replace all `***placeholders***` in `scripts/*.sh`. Core steps (see `SKILL.md` for details):
 
 ```bash
-# 0. 只读取证：找真正的大头，确认外置盘空间与格式、无进程占用
+# 0. Read-only recon: find the real bulk, confirm external disk space and format, no running process
 du -sh "$HOME/Library/Containers/<bundle-id>/Data/Library/"* | sort -h | tail
 df -h /Volumes/<external> && diskutil info /Volumes/<external> | grep -i "File System Personality"
 
-# 1. 备份大头目录到外置盘（排除 exFAT 的 ._ 元数据）
+# 1. Back up the data-heavy directory to the external disk (exclude exFAT metadata)
 rsync -a --exclude='._*' "<source-dir>/" "<backup-dir>/"
 
-# 2. 最小可行性探针：100M HFS+ 映像挂到非空目录，验证可挂载 + 卸载后数据完整恢复
+# 2. Minimal feasibility probe: mount a 100 MB image on a non-empty directory, verify mount works and data is fully restored after detach
 hdiutil create -size 100m -type SPARSEBUNDLE -fs HFS+ -volname Probe "/Volumes/<external>/probe.sparsebundle"
 hdiutil attach -mountpoint "$HOME/Library/Containers/<bundle-id>/<data-subdir>" "/Volumes/<external>/probe.sparsebundle"
 hdiutil detach "$HOME/Library/Containers/<bundle-id>/<data-subdir>"
 
-# 3. 建正式映像 → 灌数据 → 挂载到容器子目录
+# 3. Create the real image → load data → mount onto the container subdirectory
 hdiutil create -size 60g -type SPARSEBUNDLE -fs HFS+ -volname AppData "/Volumes/<external>/AppDataHFS.sparsebundle"
 hdiutil attach -nobrowse -mountpoint /tmp/stage "/Volumes/<external>/AppDataHFS.sparsebundle"
 rsync -a --exclude='._*' "<backup-dir>/" /tmp/stage/ && hdiutil detach /tmp/stage
 hdiutil attach -nobrowse -mountpoint "$HOME/Library/Containers/<bundle-id>/<data-subdir>" "/Volumes/<external>/AppDataHFS.sparsebundle"
 ```
 
-重启或拔插外置盘后只需重挂：`scripts/mount_external.sh`。To remount after reboot: run `scripts/mount_external.sh`.
+After a reboot or replugging the external disk, just remount: `scripts/mount_external.sh`.
 
-## 验收判据 / Verification Checklist
+## Verification Checklist
 
-六条缺一不可（Six checks, all required）：
+All six checks are required:
 
-| # | 判据 / Check | 命令 / Evidence | 通过 / Pass |
+| # | Check | Command / Evidence | Pass |
 | --- | --- | --- | --- |
-| 1 | 挂载生效 / mounted | `mount \| grep <target>` | hfs 记录 / hfs entry |
-| 2 | 穿透可读 / readable | `du -sh <target>` + `find <target> -type f \| wc -l` | 大小、文件数一致 / matches source |
-| 3 | 画面正常 / non-black screen | `screencapture -x -o -l <window-id>` | 截图远大于 30KB / screenshot ≫ 30KB |
-| 4 | **资源真被读取 / assets really read** | `lsof -p <pid> \| grep <target>` | 出现 `*.blk` 句柄 / `*.blk` handles |
-| 5 | 无崩溃 / no crash | `ls ~/Library/Logs/DiagnosticReports \| grep -i <app>` | 无新增 / none |
-| 6 | 可回滚 / reversible | `hdiutil detach <target>` 后 `du -sh <target>` | 原数据恢复 / restored |
+| 1 | Mount is active | `mount \| grep <target>` | an hfs entry appears |
+| 2 | Readable through the mount | `du -sh <target>` + `find <target> -type f \| wc -l` | size and file count match the source |
+| 3 | Non-black screen | `screencapture -x -o -l <window-id>` | screenshot far larger than 30 KB |
+| 4 | **Assets are really read** | `lsof -p <pid> \| grep <target>` | `*.blk` file handles appear |
+| 5 | No crash | `ls ~/Library/Logs/DiagnosticReports \| grep -i <app>` | no new entries |
+| 6 | Reversible | `hdiutil detach <target>` then `du -sh <target>` | original data fully restored |
 
-进程存活 + 截图正常 = 必要但不充分，必须到第 4 条。Process alive + normal screenshot is necessary but not sufficient — check #4.
+Process alive + normal screenshot = necessary but not sufficient; check #4 is mandatory.
 
-## 实测范围声明 / Verification Scope
+## Verification Scope
 
-**中文**：标题/description 中的「已实测」按如下范围理解——
+"Verified" in the title and description means:
 
-- **原神 Genshin Impact**：完整链路实测。HFS+ 映像挂载 → 启动游戏 → 画面正常（"点击进入"）→ `lsof` 证实进程从外置映像读取 `AssetBundles/*.blk`（198 个文件句柄）；另做过多组 A/B 单变量对照，确认软链黑屏、挂载正常。
-- **绝区零 Zenless Zone Zero**：仅完成**备份迁移**（29G 容器移到外置盘、文件数校验一致）+ exFAT 软链的读写能力测试；**未做游戏启动验证**——其 app 本体不在测试机上，无法启动。它不构成"挂载方案在其上也可用"的证据，但迁移备份本身已成功。
+- **Genshin Impact** — full end-to-end verification: HFS+ image mounted → game launched → normal "Click to Start" screen → `lsof` confirmed the process reading `AssetBundles/*.blk` from the external image (198 file handles), with multiple A/B single-variable control experiments confirming symlink failure and mount success.
+- **Zenless Zone Zero** — only **backup migration** (29 GB container moved to the external disk, file counts verified) plus an exFAT symlink read/write probe; **no game launch verification** (its app bundle was absent on the test machine). It is not evidence that the mount approach works for that game, but the backup migration itself did succeed.
 
-**EN**: "Verified" in the title/description means:
+## Failure Catalog
 
-- **Genshin Impact** — full end-to-end verification: HFS+ image mounted → game launched → normal "Click to Start" screen → `lsof` confirmed the process reading `AssetBundles/*.blk` from the external image (198 file handles), with A/B control experiments confirming symlink failure and mount success.
-- **Zenless Zone Zero** — only **backup migration** (29G container moved to external disk, file counts verified) plus an exFAT symlink read/write probe; **no game launch verification** (its app bundle was absent on the test machine). It does not constitute evidence that the mount approach works for that game; the backup migration itself did succeed.
-
-## 踩坑实录 / Failure Catalog
-
-| # | 坑 / Pitfall | 规避 / Avoidance |
+| # | Pitfall | Avoidance |
 | --- | --- | --- |
-| F1 | 软链黑屏 / symlink → black screen | 禁用软链，A/B 对照 + lsof 判据 / no symlink; A/B + lsof |
-| F2 | APFS 挂载需 root / APFS mount needs root | 先用 `sudo -n true` 探测，无 root 改 HFS+ / probe sudo, use HFS+ |
-| F3 | `rm -rf` 静默失效（TCC 保护）/ silent delete failure | 删后必复核，交用户手删 / verify after delete; ask user |
-| F4 | 废纸篓项自动加时间戳导致误判 / trash auto-renames | `ls -lat ~/.Trash \| grep -i <kw>` 全量列 / list all matches |
-| F5 | 跨盘 `mv` 报 EXDEV | 用 `cp -a` / `rsync -a` |
-| F6 | exFAT `._*` AppleDouble 使文件数翻倍 | 校验加 `--exclude='._*'` |
+| F1 | Symlink → black screen | no symlinks; A/B control + `lsof` check |
+| F2 | APFS mount needs root | probe with `sudo -n true`; use HFS+ if no passwordless sudo |
+| F3 | `rm -rf` silently fails (TCC protection) | verify after delete; ask the user to delete manually |
+| F4 | Trash item auto-renamed (false data-loss alarm) | `ls -lat ~/.Trash \| grep -i <kw>` to list all matches |
+| F5 | Cross-disk `mv` → EXDEV | use `cp -a` or `rsync -a` |
+| F6 | exFAT `._*` AppleDouble doubles the file count | add `--exclude='._*'` to verification |
 
-四要素完整复盘见 `references/failure-catalog.md`。Full 4-element postmortems: `references/failure-catalog.md`.
+Full four-element postmortems: `references/failure-catalog.md`.
 
-## 仓库文件清单 / Repository Files
+## Repository Files
 
-共 8 个文件，各司其职：
+Nine files, each with a distinct role:
 
-| 文件 / File | 是什么 / What | 有什么用 / When to read |
+| File | What it is | When to read |
 | --- | --- | --- |
-| `SKILL.md` | 主说明：核心决策树 + 8 条铁律 + 5 阶段工作流程 + 6 项验收判据 | 动手前先读它判断方案是否适用、该走哪条路；AI 助手靠它识别何时启用本 skill |
-| `references/probe-and-verify.md` | 命令手册：100M 探针、APFS/HFS+ 提权差异、窗口取证、A/B 对照、lsof 判据的可复制命令 | 抄命令、判断"真黑屏还是遮挡"、做资源层验收时查它 |
-| `references/failure-catalog.md` | 6 条失败路径的「现象 / 根因 / 为什么犯 / 如何避免」四要素复盘 | 踩坑时先查：软链黑屏、APFS 提权失败、TCC 删除静默失效等 |
-| `references/sources.md` | 官方讨论 #473 / #1712、B 站视频、技术文章的原文关键段与链接 | 需要溯源、核实"为什么软链不行"时查它 |
-| `scripts/migrate_to_external.sh` | 首次迁移流程骨架（占位符版）：盘点 → 备份 → 探针 → 建映像 → 挂载 → 验收 → 释放空间 | 首次迁移时逐段执行，每段验证后再继续，不可整段盲跑 |
-| `scripts/mount_external.sh` | 重启/拔插外置盘后的重挂脚本：已挂载直接退出、检测进程占用、检查映像存在、挂载后报资源文件数 | 每次重启或重插外置盘后运行一次 |
-| `LICENSE` | MIT 许可 | 了解使用与再分发条款 |
-| `README.md` | 本页 | 快速概览与导航 |
+| `SKILL.md` | Main guide: decision tree + 8 iron rules + 5-phase workflow + 6 verification checks | Read before starting to judge whether the approach applies and which path to take; AI assistants use it to decide when to activate this skill |
+| `references/probe-and-verify.md` | Command handbook: 100 MB probe, APFS/HFS+ privilege differences, window forensics, A/B control, `lsof` checks, with copyable commands | Copy commands; tell a real black screen from occlusion; perform asset-level verification |
+| `references/failure-catalog.md` | Four-element postmortems (symptom / root cause / why it happened / how to avoid) for 6 failure paths | Check here when hitting pitfalls: symlink black screen, APFS privilege failure, silent TCC delete failure, etc. |
+| `references/sources.md` | Original key quotes and links from official discussions #473 / #1712, Bilibili video, and technical articles | Use for source tracing and verifying why symlinks fail |
+| `scripts/migrate_to_external.sh` | First-migration skeleton (placeholder version): recon → backup → probe → create image → mount → verify → free space | Execute step by step on first migration; verify each step before continuing; never run it all blind |
+| `scripts/mount_external.sh` | Remount script for after reboot / replugging: exits if already mounted, detects running app, checks image presence, reports resource file count after mount | Run once after each reboot or disk replug |
+| `LICENSE` | MIT license | Understand usage and redistribution terms |
+| `README.md` | This page (English) | Quick overview and navigation |
+| `README.zh-CN.md` | Full Chinese version of this README | Click the link at the top for the Chinese introduction |
 
-## 安装与使用 / Installation & Usage
+## Installation & Usage
 
-### 1. 安装 / Install
+### 1. Install
 
-**作为 WorkBuddy skill（推荐）**：本机实测用户级 skill 目录为 `~/.workbuddy/skills/`，把仓库克隆进去，目录名与 `SKILL.md` 里的 `name` 一致：
+**As a WorkBuddy skill (recommended)**: the verified user-level skill directory on this machine is `~/.workbuddy/skills/`. Clone the repository into it, with the directory name matching the `name` in `SKILL.md`:
 
 ```bash
 git clone https://github.com/Jason4V/playcover-ext-drive.git \
   "$HOME/.workbuddy/skills/macos-sandbox-app-external-drive"
 ```
 
-之后用自然语言提需求即可，例如「把 PlayCover 原神的数据移到外置硬盘释放空间」，助手会依据 `SKILL.md` 的 `description` 判断是否启用；也可直接说「用 macos-sandbox-app-external-drive skill」。其他 AI 工具：把整个仓库放到该工具读取 skill 的目录，保证 `SKILL.md` 位于子目录根部。
+Then just describe the task in natural language, e.g. "move my PlayCover Genshin Impact data to an external drive to free up space". The assistant decides whether to activate the skill based on the `description` in `SKILL.md`. You can also name it explicitly: "use the macos-sandbox-app-external-drive skill". For other AI tools, place the whole repository in that tool's skill directory, with `SKILL.md` at the root of the subdirectory.
 
-### 2. 不当 skill、只当文档用 / Use as documentation
+### 2. Use as documentation only
 
-不安装也行：读 `SKILL.md` 决策树 → 按 `references/probe-and-verify.md` 跑探针 → 手动执行上面「快速开始」的命令。脚本是模板，不是开箱即用的安装包。
+No installation needed: read the decision tree in `SKILL.md` → run the probe in `references/probe-and-verify.md` → run the commands in Quick Start manually. The scripts are templates, not install-and-run packages.
 
-### 3. 脚本怎么用 / Using the scripts
+### 3. Using the scripts
 
-- 两个脚本里所有 `***...***` 都是占位符，需替换成真实值：bundle id、容器内数据子目录、外置盘路径、映像名、App 进程关键词。
-- `migrate_to_external.sh`：按顺序逐段执行，每段验证后再进下一段；第 6 段"释放本机空间"只是注释，删除本机数据需你确认后手动做。
-- `mount_external.sh`：替换占位符后可直接运行；已挂载会直接退出、App 在运行会拒绝挂载；建议重启/拔盘后跑一次。
-- 外置盘须已插入并挂载；路径含空格时保持引号。
+- All `***...***` in the scripts are placeholders; replace them with real values: bundle id, container data subdirectory, external disk path, image name, app process keyword.
+- `migrate_to_external.sh`: execute step by step, verifying each step before the next; step 6 ("free local space") is only a comment — deleting local data requires your explicit confirmation and must be done manually.
+- `mount_external.sh`: runnable after replacing placeholders; exits immediately if already mounted, refuses to mount while the app is running; run once after reboot or replugging.
+- The external disk must be connected and mounted; keep quotes around paths containing spaces.
 
-### 4. 最小使用流程 / Minimal workflow
+### 4. Minimal workflow
 
-1. 只读取证：`du` 找大头，确认外置盘空间/格式、App 未运行。
-2. 备份：`rsync -a --exclude='._*' ...`。
-3. 100M 探针：挂到真实目标目录再 `detach`，确认文件数不变。
-4. 建 HFS+ 映像 → 灌数据 → 挂到容器子目录。
-5. 启动游戏，按上面六条判据验收（尤其第 4 条 `lsof`）。
-6. 确认无误后才删除本机原目录释放空间。
+1. Read-only recon: use `du` to find the bulk; confirm external disk space and format; ensure the app is not running.
+2. Backup: `rsync -a --exclude='._*' ...`.
+3. 100 MB probe: mount onto the real target directory, then `detach` and confirm the file count is unchanged.
+4. Create the HFS+ image → load data → mount onto the container subdirectory.
+5. Launch the game and verify against the six checks above (especially #4, `lsof`).
+6. Only after everything passes, delete the original local directory to free space.
 
-## 来源 / Sources
+## Sources
 
-- PlayCover 官方 #473（为何软链不行）：https://github.com/PlayCover/PlayCover/discussions/473
-- PlayCover 官方 #1712（挂载迁移教程）：https://github.com/PlayCover/PlayCover/discussions/1712
-- B 站实测视频：https://www.bilibili.com/video/BV1i4mKYiEtt/
-- 软链 vs 挂载独立佐证：https://www.panwenbin.com/mac-softwares/运行ios-app
-- exFAT 上建映像挂到数据目录：https://egeek.me/2025/01/05/snapshots-for-ios-backups
-- 现成自动挂载工具：https://github.com/PhiLiaO93/auto-mount-Playcover
+- PlayCover official #473 (why symlinks fail): https://github.com/PlayCover/PlayCover/discussions/473
+- PlayCover official #1712 (mount migration tutorial): https://github.com/PlayCover/PlayCover/discussions/1712
+- Bilibili hands-on video: https://www.bilibili.com/video/BV1i4mKYiEtt/
+- Independent symlink-vs-mount evidence: https://www.panwenbin.com/mac-softwares/运行ios-app
+- Creating an image on exFAT and mounting it to a data directory: https://egeek.me/2025/01/05/snapshots-for-ios-backups
+- Ready-made auto-mount tool: https://github.com/PhiLiaO93/auto-mount-Playcover
 
 ## License
 
-MIT — 见 `LICENSE`。
+MIT — see `LICENSE`.
